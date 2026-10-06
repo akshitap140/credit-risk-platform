@@ -230,7 +230,7 @@ def build_pdf(filename="Aegis_Credit_Risk_Project_Manual.pdf"):
     story.append(Paragraph("4. Triple-Layer Explainable AI (XAI) Suite", h1_style))
     story.append(Paragraph("&bull; <b>Layer 1 (SHAP):</b> Computes exact Shapley values via TreeExplainer with verified mathematical additivity: sum(&phi;) + base = f(x).", bullet_style))
     story.append(Paragraph("&bull; <b>Layer 2 (LIME):</b> Generates continuous sensitivity slopes in the original unencoded feature domain, avoiding dummy categorical collisions.", bullet_style))
-    story.append(Paragraph("&bull; <b>Layer 3 (Neuro-Symbolic Syllogisms):</b> Codifies Basel-III and consumer credit rules in First-Order Logic (e.g. <i>forall x (DTI(x) &gt; 40% &rarr; ElevatedRisk(x))</i>) and tracks consensus with ML.", bullet_style))
+    story.append(Paragraph("&bull; <b>Layer 3 (Neuro-Symbolic Syllogisms):</b> Codifies consumer-credit policy rules (project-configured thresholds, e.g. DTI > 40% → ElevatedRisk) in First-Order Logic and tracks consensus with ML.", bullet_style))
 
     story.append(PageBreak())
 

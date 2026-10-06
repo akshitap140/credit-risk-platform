@@ -831,6 +831,9 @@ elif navigation == "🔍 Explain My Decision (XAI)":
                     <span class='badge-pill pill-emerald'>&#10003; Additivity Axiom Verified</span>
                 </div>
                 """, unsafe_allow_html=True)
+        else:
+            detail = shap_res.get("detail") or "Exact SHAP attribution unavailable for this request."
+            st.warning(detail)
 
     with tab_lime:
         st.markdown("#### **LIME (Local Interpretable Model-agnostic Explanations)**")
@@ -868,14 +871,14 @@ elif navigation == "🔍 Explain My Decision (XAI)":
             """, unsafe_allow_html=True)
 
     with tab_rules:
-        st.markdown("#### **Neuro-Symbolic Reasoning Engine & Syllogistic Policy Audit**")
+        st.markdown("#### **Neuro-Symbolic Syllogisms & Policy Bounds**")
         st.caption("Synthesizes statistical probability with First-Order Logic constraints for formal regulatory auditing.")
         sym_audit = symbolic_engine.evaluate_applicant(applicant, feat_df.iloc[0].to_dict(), ml_prob)
         col_r1, col_r2 = st.columns([1.6, 1])
         with col_r1:
-            st.markdown("##### **Evaluated First-Order Syllogisms & Prudential Bounds**")
+            st.markdown("##### **Evaluated First-Order Syllogisms & Policy Bounds**")
             if not sym_audit["triggered_rules"]:
-                st.success("Applicant complies with all prudential limits; no regulatory warning triggered.")
+                st.success("Applicant meets all configured policy thresholds; no regulatory warning triggered.")
             else:
                 for r in sym_audit["triggered_rules"]:
                     box_cls = "risk" if r["type"] == "NEGATIVE" else "merit"
@@ -902,10 +905,19 @@ elif navigation == "🔍 Explain My Decision (XAI)":
                     <span style='color:#64748B;'>Symbolic Risk Score:</span>
                     <strong style='color:#E2E8F0;'>{sym_audit['symbolic_score']:.0f} / 100</strong>
                 </div>
-                <div style='display:flex; justify-content:space-between;'>
-                    <span style='color:#64748B;'>Empirical ML Probability:</span>
-                    <strong style='color:#E2E8F0;'>{ml_prob*100:.1f}%</strong>
+                <div style='display:flex; justify-content:space-between; margin-bottom:8px;'>
+                    <span style='color:#64748B;'>ML Decision Band:</span>
+                    <strong style='color:#E2E8F0;'>{sym_audit['consensus_status'].split()[0]} ({sym_audit['ml_decision_band']})</strong>
                 </div>
+                <div style='display:flex; justify-content:space-between; margin-bottom:8px;'>
+                    <span style='color:#64748B;'>Symbolic Decision Band:</span>
+                    <strong style='color:#E2E8F0;'>{sym_audit['symbolic_decision_band']}</strong>
+                </div>
+                <div style='display:flex; justify-content:space-between;'>
+                    <span style='color:#64748B;'>Consensus:</span>
+                    <strong style='color:{sym_audit["status_color"]};'>{sym_audit["consensus_status"]}</strong>
+                </div>
+                <p style='color:#64748B; font-size:0.86rem; line-height:1.5;'>{sym_audit["consensus_desc"]}</p>
             </div>
             """, unsafe_allow_html=True)
 

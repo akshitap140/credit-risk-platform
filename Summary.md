@@ -65,14 +65,14 @@
 
 ### Q6: "Why do you need Neuro-Symbolic AI if you already have SHAP and LIME?"
 * **Answer:**  
-  *"SHAP and LIME provide post-hoc local correlations, but they cannot enforce legal constraints or statutory policy rules. For example, banking regulations strictly cap Debt-to-Income at 40% and require prudential liquidity buffers.  
+  *"SHAP and LIME provide post-hoc local correlations, but they cannot enforce legal constraints or statutory policy rules. For example, Our underwriting policies cap Debt-to-Income around 40% and require liquidity buffers as configurable policy parameters (not statutory Basel III limits); our rulebook encodes such thresholds as project-configured parameters for demonstration purposes.  
   Our Neuro-Symbolic layer integrates First-Order Logic syllogisms with the empirical gradient boosted output. If the ML model outputs a low risk score but the borrower violates statutory debt caps, our symbolic consensus engine flags the divergence, guaranteeing regulatory auditability."*
 
 ---
 
 ### Q7: "How does your system address Financial Inclusion (UN SDG 1 & 10)?"
 * **Answer:**  
-  *"Standard bureau algorithms penalize first-time credit applicants (`NewCreditCustomer == Yes`) simply due to a lack of past credit footprint. Aegis incorporates a 'Financial Inclusion Safe Harbor Rule' in our symbolic rulebook: if a thin-file borrower demonstrates strong discretionary free cash (> €500/month) and a low payment-to-income ratio (< 20%), our engine overrides legacy penalties and tags them for responsible approval."*
+  *"Standard bureau algorithms penalize first-time credit applicants (`NewCreditCustomer == Yes`) simply due to a lack of past credit footprint. Aegis incorporates a 'Financial Inclusion Safe Harbor Flag' in our symbolic rulebook (shared thresholds with rule R7: FreeCash > €500 and P2I < 20% for thin-file borrowers). The flag grants a −20 point policy credit and tags the applicant as a Financial Inclusion candidate; the ML underwriting decision itself is not overridden."*
 
 ---
 

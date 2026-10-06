@@ -54,6 +54,15 @@ MODEL_DESCRIPTIONS = {
 }
 
 # -------------------------------------------------------------
+# Financial Inclusion thresholds.
+# Single source of truth shared by the inclusion flag in
+# predict_credit_risk() and by symbolic rule R7 in neuro_symbolic.py,
+# so the two can never drift apart again.
+# -------------------------------------------------------------
+INCLUSION_FREE_CASH_MIN = 500.0   # EUR of discretionary monthly free cash
+INCLUSION_P2I_MAX = 0.20          # payment-to-income ceiling (20%)
+
+# -------------------------------------------------------------
 # 1. Feature Specifications
 # -------------------------------------------------------------
 NUMERIC_FEATURES = [
@@ -265,6 +274,19 @@ def get_all_model_pipelines() -> Dict[str, Pipeline]:
 # -------------------------------------------------------------
 def predict_credit_risk(pipeline: Pipeline, applicant_data: Dict[str, Any]) -> Dict[str, Any]:
     """Runs single applicant inference and produces PD, Risk Category, and Credit Grade."""
+    # Derive cash-flow fields once if the caller omitted them or passed None,
+    # so grading, rules and the inclusion flag all see the same concrete values.
+    if applicant_data.get("DebtToIncome") is None:
+        applicant_data["DebtToIncome"] = (
+            applicant_data.get("LiabilitiesTotal", 0.0) / max(1.0, applicant_data.get("IncomeTotal", 1.0))
+        )
+    if applicant_data.get("FreeCash") is None:
+        applicant_data["FreeCash"] = (
+            applicant_data.get("IncomeTotal", 0.0)
+            - applicant_data.get("MonthlyPayment", 0.0)
+            - applicant_data.get("LiabilitiesTotal", 0.0)
+        )
+
     input_df = pd.DataFrame([applicant_data])
     feat_df = engineer_features(input_df)
 
@@ -302,12 +324,15 @@ def predict_credit_risk(pipeline: Pipeline, applicant_data: Dict[str, Any]) -> D
         recommendation = "Declined (Critical Risk)"
         color = "#991B1B"
 
-    # Financial Inclusion Flag
+    # Financial Inclusion Flag — thresholds must match symbolic rule R7
+    # (shared constants INCLUSION_FREE_CASH_MIN / INCLUSION_P2I_MAX).
+    free_cash = float(applicant_data.get("FreeCash") or 0.0)
+    p_to_i = applicant_data.get("MonthlyPayment", 0.0) / max(1.0, applicant_data.get("IncomeTotal", 1.0))
     is_inclusion_candidate = (
         applicant_data.get("NewCreditCustomer") == "Yes"
         and prob_default < 0.55
-        and applicant_data.get("FreeCash", 0.0) > 300.0
-        and (applicant_data.get("MonthlyPayment", 0.0) / max(1.0, applicant_data.get("IncomeTotal", 1.0))) < 0.30
+        and free_cash > INCLUSION_FREE_CASH_MIN
+        and p_to_i < INCLUSION_P2I_MAX
     )
 
     return {

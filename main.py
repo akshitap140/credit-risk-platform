@@ -6,7 +6,7 @@ Fully documented with OpenAPI (Swagger UI) at /docs.
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Dict, Any, List, Optional
 import pandas as pd
 import numpy as np
@@ -76,6 +76,20 @@ class ApplicantRequest(BaseModel):
     AmountOfPreviousLoansBeforeLoan: float = Field(2500.0, ge=0.0, description="Cumulative prior borrowed principal in EUR")
     PreviousRepaymentsBeforeLoan: float = Field(2500.0, ge=0.0, description="Total prior principal repayments satisfied in EUR")
 
+    @model_validator(mode="after")
+    def derive_cashflow_fields(self) -> "ApplicantRequest":
+        """Derives DebtToIncome and FreeCash exactly once, at the schema boundary.
+
+        Every endpoint (/predict, /explain/shap, /explain/lime, /audit/rules)
+        therefore receives the same concrete values instead of None, which
+        previously caused float(None) crashes and silent median imputation.
+        """
+        if self.DebtToIncome is None:
+            self.DebtToIncome = self.LiabilitiesTotal / max(1.0, self.IncomeTotal)
+        if self.FreeCash is None:
+            self.FreeCash = self.IncomeTotal - self.MonthlyPayment - self.LiabilitiesTotal
+        return self
+
 class PredictionResponse(BaseModel):
     probability_of_default: float
     credit_grade: str
@@ -83,7 +97,7 @@ class PredictionResponse(BaseModel):
     recommendation: str
     accent_color: str
     is_inclusion_candidate: bool
-    engineered_features: Dict[str, float]
+    engineered_features: Dict[str, Any]
 
 class SHAPExplanationResponse(BaseModel):
     success: bool
@@ -92,6 +106,7 @@ class SHAPExplanationResponse(BaseModel):
     implied_probability: float
     additivity_verified: bool
     top_drivers: List[Dict[str, Any]]
+    detail: Optional[str] = Field(None, description="Diagnostic message when exact attribution was unavailable")
 
 class LIMEExplanationResponse(BaseModel):
     success: bool
@@ -102,7 +117,14 @@ class LIMEExplanationResponse(BaseModel):
 
 class NeuroSymbolicResponse(BaseModel):
     symbolic_score: float
-    symbolic_risk_probability: float
+    symbolic_risk_probability: float = Field(
+        ...,
+        description="Normalized symbolic risk index in [0,1] (scorecard points / 100). "
+                    "This is NOT a calibrated probability of default; consensus with the ML "
+                    "model is decided on shared decision bands, not on this raw number."
+    )
+    ml_decision_band: str = Field(..., description="Underwriting decision band derived from the ML PD")
+    symbolic_decision_band: str = Field(..., description="Underwriting decision band derived from the symbolic scorecard index")
     triggered_rules: List[Dict[str, Any]]
     negative_rules_count: int
     positive_rules_count: int
@@ -115,7 +137,7 @@ class NeuroSymbolicResponse(BaseModel):
 # 3. Microservice Endpoints
 # -------------------------------------------------------------
 @app.get("/", tags=["Health"])
-def health_check():
+async def health_check():
     return {
         "service": "Aegis Credit Risk Microservice",
         "status": "HEALTHY",
@@ -124,19 +146,14 @@ def health_check():
     }
 
 @app.post("/api/v1/predict", response_model=PredictionResponse, tags=["Scoring Engine"])
-def predict(applicant: ApplicantRequest):
+async def predict(applicant: ApplicantRequest):
     """Computes real-time Probability of Default (PD), regulatory credit grade, and underwriting recommendation."""
     data_dict = applicant.model_dump()
-    if data_dict.get("DebtToIncome") is None:
-        data_dict["DebtToIncome"] = data_dict["LiabilitiesTotal"] / max(1.0, data_dict["IncomeTotal"])
-    if data_dict.get("FreeCash") is None:
-        data_dict["FreeCash"] = data_dict["IncomeTotal"] - data_dict["MonthlyPayment"] - data_dict["LiabilitiesTotal"]
-
     res = predict_credit_risk(pipeline, data_dict)
     return res
 
 @app.post("/api/v1/explain/shap", response_model=SHAPExplanationResponse, tags=["Explainable AI"])
-def explain_shap(applicant: ApplicantRequest):
+async def explain_shap(applicant: ApplicantRequest):
     """Generates exact SHAP tree attributions and verifies mathematical additivity."""
     data_dict = applicant.model_dump()
     feat_df = engineer_features(pd.DataFrame([data_dict]))
@@ -144,14 +161,14 @@ def explain_shap(applicant: ApplicantRequest):
     return shap_res
 
 @app.post("/api/v1/explain/lime", response_model=LIMEExplanationResponse, tags=["Explainable AI"])
-def explain_lime(applicant: ApplicantRequest):
+async def explain_lime(applicant: ApplicantRequest):
     """Fits local continuous surrogate (LIME) within unencoded original applicant feature domain."""
     data_dict = applicant.model_dump()
     lime_res = xai_engine.explain_lime(data_dict)
     return lime_res
 
 @app.post("/api/v1/audit/rules", response_model=NeuroSymbolicResponse, tags=["Neuro-Symbolic Governance"])
-def audit_symbolic(applicant: ApplicantRequest):
+async def audit_symbolic(applicant: ApplicantRequest):
     """Executes First-Order Logic expert rulebook and evaluates consensus with empirical ML."""
     data_dict = applicant.model_dump()
     feat_df = engineer_features(pd.DataFrame([data_dict]))
@@ -160,12 +177,12 @@ def audit_symbolic(applicant: ApplicantRequest):
     return audit_res
 
 @app.get("/api/v1/fairness", tags=["Responsible AI"])
-def get_fairness_metrics():
+async def get_fairness_metrics():
     """Returns demographic parity, disparate impact ratios, and proxy variable audits."""
     return get_fairness_audit_data()
 
 @app.get("/api/v1/benchmarks", tags=["Model Card"])
-def get_model_card_benchmarks():
+async def get_model_card_benchmarks():
     """Returns 7-model cross-validation and test benchmark leaderboard."""
     card_path = os.path.join(os.path.dirname(__file__), "model_card.json")
     if os.path.exists(card_path):

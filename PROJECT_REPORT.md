@@ -139,7 +139,7 @@ For $N = 22,069$ untouched holdout test loans:
 * **False Positives (Type I Error - Safe borrower declined):** 1,798
 * **False Negatives (Type II Error - Defaulted borrower approved):** 2,982
 * **True Positives (Correct Rejections):** 11,165
-* **Cost Asymmetry:** In consumer credit, Type II errors (default loss) carry $4\times$ to $6\times$ the monetary cost of Type I errors (forgone interest), justifying threshold calibration at 35% rather than a naive 50%.
+* **Cost Asymmetry:** In consumer credit, Type II errors (default loss) carry $4\times$ to $6\times$ the monetary cost of Type I errors (forgone interest), justifying threshold calibration at the standard 45 % (the platform's C/D boundary) rather than a naive 50 %.
 
 ### 5.3 Honest Temporal Out-of-Time Validation (Macroeconomic Drift)
 * **Random Stratified Test ROC-AUC:** $0.781$
@@ -159,10 +159,14 @@ Top risk-amplifying features across the cohort are **Interest Rate**, **Payment-
 Operating in the original continuous applicant space rather than one-hot dummy space prevents impossible combinations (e.g., simultaneously being Married and Single). Local linear fidelity achieves an average neighborhood $R^2 \approx 0.52 - 0.68$.
 
 ### 6.3 Layer 3: First-Order Logic Neuro-Symbolic Syllogisms
-Nine explicit supervisory policy rules codify Basel-III prudential standards:
+Nine explicit First-Order Logic policy rules encode project-configured underwriting thresholds.
+These thresholds are illustrative consumer-lending heuristics — they are NOT
+statutory limits and NOT literal Basel III (BCBS capital/liquidity) requirements.
+Calibrate them per jurisdiction before any production use.
+
 * **Rule R1 (Excessive Debt Burden):** $\forall x (\text{DTI}(x) > 40\% \lor \text{L2I}(x) > 35\% \to \text{ElevatedRisk}(x))$
 * **Rule R6 (Proven Track Record):** $\forall x (\text{PreviousRepayments}(x) \ge 90\% \to \text{RiskMitigant}(x))$
-* **Rule R7 (Financial Inclusion Safe Harbor):** $\forall x (\text{ThinFile}(x) \land \text{FreeCash}(x) > 500\text{€} \land \text{P2I}(x) < 20\% \to \text{InclusionWaiver}(x))$
+* **Rule R7 (Financial Inclusion Safe Harbor):** $\forall x (\text{ThinFile}(x) \land \text{FreeCash}(x) > 500\text{€} \land \text{P2I}(x) < 20\% \to \text{InclusionCandidate}(x))$
 
 ---
 

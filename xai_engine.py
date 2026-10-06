@@ -9,14 +9,27 @@ from typing import Dict, Any, List
 import shap
 from sklearn.linear_model import Ridge
 
+# Tolerance for verifying that base_val + sum_shap matches the model's own output.
+# XGBoost SHAP values live in raw margin (log-odds) space, where exact additivity holds
+# to float32 precision (~1e-5). RandomForest TreeExplainer operates in probability space,
+# where the same relationship holds to ~1e-4 relative error. A single universal tolerance
+# balances both model families.
+ADDITIVITY_TOL = 1e-4
+
+
 class XAIEngine:
     def __init__(self, pipeline):
         self.pipeline = pipeline
         self.preprocessor = getattr(pipeline, "named_steps", {}).get("preprocessor", None)
         self.classifier = getattr(pipeline, "named_steps", {}).get("classifier", None)
 
+    @staticmethod
+    def _classifier_module(cls) -> str:
+        """Return the top-level module name of a classifier class (e.g. 'xgboost')."""
+        return getattr(cls, "__module__", "").split(".")[0] if cls else ""
+
     def explain_shap(self, input_features_df: pd.DataFrame) -> Dict[str, Any]:
-        """Calculates SHAP tree attributions and verifies additivity."""
+        """Calculates SHAP tree attributions and verifies mathematical additivity."""
         try:
             # Transform input features using pipeline preprocessor
             if self.preprocessor is not None:
@@ -44,11 +57,27 @@ class XAIEngine:
                 vals = np.array(shap_values).flatten()
                 base_val = 0.0
 
-            # Additivity check verification
             sum_shap = float(np.sum(vals))
-            raw_margin = base_val + sum_shap
-            prob_implied = 1.0 / (1.0 + np.exp(-raw_margin))
-            additivity_verified = True  # TreeExplainer is strictly additive in log-odds margin space
+            raw_sum = base_val + sum_shap
+
+            # Reference output from the model itself, in the same space as the SHAP values.
+            pred_prob = float(np.clip(self.pipeline.predict_proba(input_features_df)[0, 1], 1e-12, 1 - 1e-12))
+            if self._classifier_module(self.classifier).startswith("xgboost"):
+                # XGBoost SHAP values are in log-odds margin space; compare against logit(p)
+                reference_output = float(np.log(pred_prob / (1.0 - pred_prob)))
+                # implied probability from the verified margin
+                prob_implied = 1.0 / (1.0 + np.exp(-raw_sum))
+            else:
+                # Tree ensemble (e.g. RandomForest) SHAP values live in probability space;
+                # the raw sum already approximates the predicted probability.
+                reference_output = pred_prob
+                prob_implied = np.clip(raw_sum, 0.0, 1.0)
+
+            # Verify additivity: exact match between (base + sum) and the model's own output.
+            additivity_verified = bool(abs(raw_sum - reference_output) <= ADDITIVITY_TOL)
+            detail = None if additivity_verified else (
+                f"|f(x) - (base + sum)| = {abs(raw_sum - reference_output):.2e} exceeds tolerance {ADDITIVITY_TOL}"
+            )
 
             # Format feature names for clean UI display
             clean_names = []
@@ -76,16 +105,44 @@ class XAIEngine:
                 "sum_shap": sum_shap,
                 "implied_probability": prob_implied,
                 "additivity_verified": additivity_verified,
+                "detail": detail,
                 "top_drivers": top_drivers
             }
 
         except Exception as e:
-            # Fallback heuristic feature importance if shap tree fails
-            print(f"[xai_engine] SHAP TreeExplainer warning: {e}. Using permutation surrogate.")
-            return self._heuristic_shap_fallback(input_features_df)
+            # Fallback heuristic feature importance if shap tree fails — be honest:
+            # do NOT report success=True or additivity_verified=True with fake values.
+            warning_msg = f"[xai_engine] SHAP TreeExplainer warning: {e}. Using permutation surrogate."
+            print(warning_msg)
+            row = input_features_df.iloc[0]
+            base_prob = float(self.pipeline.predict_proba(input_features_df)[0, 1])
+
+            drivers = [
+                {"feature": "Interest Rate", "shap_value": float(0.04 * (row.get("Interest", 20.0) - 20.0))},
+                {"feature": "Payment to Income", "shap_value": float(1.2 * (row.get("PaymentToIncome", 0.15) - 0.12))},
+                {"feature": "Loan Duration", "shap_value": float(0.02 * (row.get("LoanDuration", 36) - 36))},
+                {"feature": "Discretionary Free Cash", "shap_value": float(-0.0003 * (row.get("FreeCash", 500) - 400))},
+                {"feature": "Total Liabilities", "shap_value": float(0.0004 * (row.get("LiabilitiesTotal", 200) - 150))},
+                {"feature": "Previous Repayment History", "shap_value": float(-0.6 * row.get("PreviousRepaymentRatio", 0.0))}
+            ]
+            for d in drivers:
+                d["abs_val"] = abs(d["shap_value"])
+                d["direction"] = "Increases Risk" if d["shap_value"] > 0 else "Lowers Risk"
+
+            drivers.sort(key=lambda x: x["abs_val"], reverse=True)
+
+            return {
+                "success": False,
+                "base_value": 0.0,
+                "sum_shap": float(sum(d["shap_value"] for d in drivers)),
+                "implied_probability": base_prob,
+                "additivity_verified": False,
+                "detail": f"Exact TreeExplainer attribution unavailable ({e}); showing heuristic directional sensitivities only.",
+                "top_drivers": drivers
+            }
 
     def _heuristic_shap_fallback(self, input_features_df: pd.DataFrame) -> Dict[str, Any]:
-        """Graceful fallback computing directional sensitivities."""
+        """Deprecated: use the outer try/except fallback instead."""
         row = input_features_df.iloc[0]
         base_prob = float(self.pipeline.predict_proba(input_features_df)[0, 1])
 
@@ -102,12 +159,14 @@ class XAIEngine:
             d["direction"] = "Increases Risk" if d["shap_value"] > 0 else "Lowers Risk"
 
         drivers.sort(key=lambda x: x["abs_val"], reverse=True)
+        # This method is no longer called directly; the outer except block handles the
+        # fallback path with proper honesty about success=False / additivity_verified=False.
         return {
-            "success": True,
-            "base_value": 0.45,
+            "success": False,
+            "base_value": 0.0,
             "sum_shap": float(sum(d["shap_value"] for d in drivers)),
             "implied_probability": base_prob,
-            "additivity_verified": True,
+            "additivity_verified": False,
             "top_drivers": drivers
         }
 
